@@ -21,12 +21,16 @@ fn main() {
 
     let listener = TcpListener::bind(addr).unwrap();
 
+    let mut visitor_count = 0;
+
     println!("Listening on [{}] ...", addr);
 
     for stream in listener.incoming() {
         match stream {
             Err(_) => (),
             Ok(mut stream) => {
+                visitor_count += 1;
+
                 // Spawn a thread to handle the connection
                 thread::spawn(move|| {
                     match stream.peer_addr() {
@@ -41,6 +45,7 @@ fn main() {
                         Ok(body) => println!("Recieved request body:\n{}", body),
                     }
 
+                    println!("Visitor Count {}", visitor_count);
                     let response =
                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
                          <doctype !html><html><head><title>Hello, Rust!</title>
