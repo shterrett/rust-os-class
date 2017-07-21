@@ -11,17 +11,24 @@
 // Weilin Xu and David Evans
 // Version 0.3
 
-use std::io::{Read, Write};
+#[macro_use]
+extern crate lazy_static;
+extern crate regex;
+
+use std::io::{Read};
 use std::net::TcpListener;
 use std::str;
 use std::thread;
+
+mod path;
+mod handler;
 
 fn main() {
     let addr = "127.0.0.1:4414";
 
     let listener = TcpListener::bind(addr).unwrap();
 
-    let mut visitor_count = 0;
+    let mut visitor_count: u16 = 0;
 
     println!("Listening on [{}] ...", addr);
 
@@ -42,23 +49,14 @@ fn main() {
                     stream.read(&mut buf).unwrap();
                     match str::from_utf8(&buf) {
                         Err(error) => println!("Received request error:\n{}", error),
-                        Ok(body) => println!("Recieved request body:\n{}", body),
+                        Ok(body) => {
+                            let req_path = path::path(body);
+                            println!("Recieved request body:\n{}", body);
+                            println!("Requested Path: {}\n", req_path);
+                            handler::handle_request(req_path, visitor_count, &mut stream)
+                        }
                     }
 
-                    let response =
-                        format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
-                                <doctype !html><html><head><title>Hello, Rust!</title>
-                                <style>body {{ background-color: #111; color: #FFEEAA }}
-                                        h1 {{ font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red }}
-                                        h2 {{ font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm green }}
-                                </style></head>
-                                <body>
-                                <h1>Greetings, Krusty!</h1>
-                                <h2>Visitor Count {}<h2>
-                                </body></html>\r\n",
-                                visitor_count
-                            );
-                    stream.write(response.as_bytes()).unwrap();
                     println!("Connection terminates.");
                 });
             },
