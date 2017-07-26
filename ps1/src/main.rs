@@ -22,6 +22,7 @@ use std::thread;
 
 mod path;
 mod handler;
+mod http;
 
 fn main() {
     let addr = "127.0.0.1:4414";
@@ -53,7 +54,8 @@ fn main() {
                             let req_path = path::path(body);
                             println!("Recieved request body:\n{}", body);
                             println!("Requested Path: {}\n", req_path);
-                            handler::handle_request(req_path, visitor_count, &mut stream)
+                            let status = handler::handle_request(req_path, visitor_count, &mut stream);
+                            println!("Response Status: {}", status);
                         }
                     }
 

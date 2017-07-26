@@ -1,17 +1,38 @@
-use std::io;
-use std::io::{ Read, Write, BufReader, BufWriter };
+use std::io::{ Read, Write };
 use std::fs::File;
 use path::Path;
+use http;
 
-pub fn handle_request<T: Write>(path: Path, visitor_count: u16, stream: &mut T) {
-    stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
-    match path {
-        Path::Root => root_handler(visitor_count, stream),
-        Path::RelPath(path) => file_handler(path, stream)
+pub fn handle_request<T: Write>(path: Path, visitor_count: u16, stream: &mut T) -> http::Status {
+    let response_status =
+        router(path, visitor_count)
+            .and_then(|bytes|{
+                let header = http::header(&http::Status::Ok);
+                stream.write(&header)
+                    .and_then(|_| stream.write(&bytes))
+                    .map_err(|_| http::Status::Error)
+            })
+            .map_err(|e| {
+                match stream.write(&http::header(&e)) {
+                    Ok(_) => e,
+                    Err(_) => http::Status::Error
+                }
+            });
+
+    match response_status {
+        Ok(_) => http::Status::Ok,
+        Err(e) => e
     }
 }
 
-fn root_handler<T: Write>(visitor_count: u16, stream: &mut T) {
+fn router(path: Path, visitor_count: u16) -> Result<Vec<u8>, http::Status> {
+    match path {
+        Path::Root => root_handler(visitor_count),
+        Path::RelPath(path) => file_handler(path)
+    }
+}
+
+fn root_handler(visitor_count: u16) -> Result<Vec<u8>, http::Status> {
     let response =
         format!("<doctype !html><html><head><title>Hello, Rust!</title>
                 <style>body {{ background-color: #111; color: #FFEEAA }}
@@ -24,39 +45,29 @@ fn root_handler<T: Write>(visitor_count: u16, stream: &mut T) {
                 </body></html>\r\n",
                 visitor_count
             );
-    stream.write(response.as_bytes()).unwrap();
+    Ok(response.into_bytes())
 }
 
-fn file_handler<T: Write>(path: String, stream: &mut T) {
-    match File::open(path) {
-        Ok(mut f) => {
-            if let Err(io_error) = write_file(&mut f, stream) {
-                println!("FILE RESULT: {}", io_error);
-            }
-        },
-        Err(_) => {}
-    }
-}
-
-fn write_file<T: Write>(f: &mut File, stream: &mut T) -> io::Result<bool> {
-    let mut tmp: Vec<u8> = Vec::new();
-    let mut reader = BufReader::new(f);
-    let mut writer = BufWriter::new(stream);
-    try!(reader.read_to_end(&mut tmp));
-    try!(writer.write_all(&tmp));
-    try!(writer.flush());
-    Ok(true)
+fn file_handler(path: String) -> Result<Vec<u8>, http::Status> {
+    let mut bytes: Vec<u8> = Vec::new();
+    File::open(path)
+        .and_then(|mut f| {
+            f.read_to_end(&mut bytes)
+        })
+        .map(|_| bytes)
+        .map_err(|_| http::Status::FileNotFound)
 }
 
 #[cfg(test)]
 mod test {
     use regex::Regex;
-    use super::{ root_handler, file_handler };
+    use path::Path;
+    use super::handle_request;
 
     #[test]
     fn root_handler_writes_html() {
         let mut output: Vec<u8> = Vec::new();
-        root_handler(5, &mut output);
+        handle_request(Path::Root, 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
 
@@ -70,10 +81,12 @@ mod test {
     #[test]
     fn file_handler_returns_given_file() {
         let mut output: Vec<u8> = Vec::new();
-        file_handler("test/response.html".to_string(), &mut output);
+        handle_request(Path::RelPath("test/response.html".to_string()), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
 
-        assert_eq!(html, "<h1>Test Response</h1>\n".to_string());
+        let response = Regex::new(r"<h1>Test Response</h1>\n").unwrap();
+
+        assert!(response.is_match(&html));
     }
 }
