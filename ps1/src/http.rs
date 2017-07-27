@@ -3,7 +3,8 @@ use std::fmt;
 pub enum Status {
     Ok,
     FileNotFound,
-    Error
+    Error,
+    NotAuthorized
 }
 
 impl fmt::Display for Status {
@@ -11,7 +12,8 @@ impl fmt::Display for Status {
         match self {
             &Status::Ok => write!(f, "200 OK"),
             &Status::FileNotFound => write!(f, "404 Not Found"),
-            &Status::Error => write!(f, "500 Internal Server Error")
+            &Status::Error => write!(f, "500 Internal Server Error"),
+            &Status::NotAuthorized => write!(f, "401 Not Authorized")
         }
     }
 }
@@ -32,5 +34,7 @@ mod test {
                    header(&Status::FileNotFound));
         assert_eq!("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".to_string().into_bytes(),
                    header(&Status::Error));
+        assert_eq!("HTTP/1.1 401 Not Authorized\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".to_string().into_bytes(),
+                   header(&Status::NotAuthorized));
     }
 }
