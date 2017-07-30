@@ -20,3 +20,11 @@ The writes occur concurrently and may appear in any order.
 
 Without calling `wait`, execution order cannot be guaranteed. However, a
 reasonable approximation may be made using a sufficiently long `sleep` period
+
+
+## 4
+
+Multiple variations of `exec` exist to allow (but not require) customization of
+the environment in which the process is spawned. They allow various combinations
+of specifying the environment variables, path, and arguments to the
+to-be-spawned process.
