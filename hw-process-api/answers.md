@@ -8,3 +8,10 @@ immediately  before `fork` was called
 The variable can be changed by both the child and parent. Because they are
 different processes, changing the value in one process does not affect the value
 in the other process.
+
+## 2
+
+Both the child and parent have access to the file descriptor and can write to
+it.
+
+The writes occur concurrently and may appear in any order.

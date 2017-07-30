@@ -1,0 +1,7 @@
+[package]
+name = "fork-open"
+version = "0.1.0"
+authors = ["stuart"]
+
+[dependencies]
+nix = "0.9.0"
