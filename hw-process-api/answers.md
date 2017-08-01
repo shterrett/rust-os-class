@@ -34,8 +34,14 @@ to-be-spawned process.
 `wait` returns a `Result` containing either an `Error` or the event received from
 the child - `Exited`, `Signaled`, `Stopped`, etc...
 
-## 5
+## 6
 
 `waitpid` works just like wait, except that it takes a specific PID. This is
 useful when there are multiple child processes and the parent wants to wait on a
 specific one.
+
+## 7
+
+closing `stdout` and then attempting to print results in not printing. However,
+the parent may still print because the child is isolated, and changes it makes
+to its resources do not affect the parent.
