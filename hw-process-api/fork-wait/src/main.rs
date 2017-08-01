@@ -1,12 +1,12 @@
 extern crate nix;
 use nix::unistd::{ fork, ForkResult };
-use nix::sys::wait::{ wait, WaitStatus };
+use nix::sys::wait::{ waitpid, WaitStatus };
 
 fn main() {
     match fork() {
-        Ok(ForkResult::Parent{..}) => {
+        Ok(ForkResult::Parent{child, ..}) => {
             println!("Parent spawned!");
-            match wait() {
+            match waitpid(child, None) {
                 Err(_) => println!("Wait failed!"),
                 Ok(WaitStatus::Exited(_, _)) => println!("Child Exited"),
                 Ok(WaitStatus::Signaled(_, _, _)) => println!("Child Signaled"),

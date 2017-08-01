@@ -28,3 +28,14 @@ Multiple variations of `exec` exist to allow (but not require) customization of
 the environment in which the process is spawned. They allow various combinations
 of specifying the environment variables, path, and arguments to the
 to-be-spawned process.
+
+## 5
+
+`wait` returns a `Result` containing either an `Error` or the event received from
+the child - `Exited`, `Signaled`, `Stopped`, etc...
+
+## 5
+
+`waitpid` works just like wait, except that it takes a specific PID. This is
+useful when there are multiple child processes and the parent wants to wait on a
+specific one.
