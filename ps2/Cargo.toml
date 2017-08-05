@@ -6,3 +6,4 @@ authors = ["Weilin Xu <mzweilin@gmail.com>", "David Evans <evans@virginia.edu>"]
 
 [dependencies]
 getopts = "*"
+lazy_static = "0.2"
