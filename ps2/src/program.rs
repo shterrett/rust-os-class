@@ -1,14 +1,5 @@
-use std::collections::HashSet;
-
-lazy_static! {
-    static ref BUILTINS: HashSet<&'static str> = {
-        let mut builtins = HashSet::new();
-        builtins.insert("exit");
-        builtins
-    };
-}
-
-use std::process::{ Command, exit };
+use std::process::Command;
+use builtin::{ builtin_exists, Builtin };
 
 pub enum Program<'a> {
     Internal(Builtin<'a>),
@@ -16,28 +7,11 @@ pub enum Program<'a> {
     NotFound
 }
 
-pub struct Builtin<'a> {
-    name: &'a str,
-    args: Vec<&'a str>
-}
-
-impl<'a> Builtin<'a> {
-    pub fn run(&self) {
-        match self.name {
-            "exit" => exit(0),
-            _ => panic!()
-        }
-    }
-}
-
 pub fn resolve_program<'a>(cmd: &'a str) -> Program<'a> {
     if let  Some((cmd_path, args)) = cmd_and_args(cmd) {
         if builtin_exists(cmd_path) {
             Program::Internal(
-                Builtin {
-                    name: cmd_path,
-                    args: args
-                }
+                Builtin::new(cmd_path, args)
             )
         } else if cmd_exists(cmd_path) {
             Program::External((cmd_path, args))
@@ -60,10 +34,6 @@ fn cmd_and_args<'a>(cmd: &'a str) -> Option<(&'a str, Vec<&'a str>)> {
 
     argv.split_first()
         .map(|(&name, args)| (name, args.to_vec()))
-}
-
-fn builtin_exists(cmd_path: &str) -> bool {
-    BUILTINS.contains(cmd_path)
 }
 
 fn cmd_exists(cmd_path: &str) -> bool {
