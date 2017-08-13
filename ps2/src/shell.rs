@@ -5,17 +5,21 @@ use program::{
     Program,
     resolve_program
 };
+use history::History;
+
 
 pub struct Shell<'a> {
     cmd_prompt: &'a str,
-    pub working_dir: PathBuf
+    pub working_dir: PathBuf,
+    pub history: History
 }
 
 impl<'a> Shell<'a> {
     pub fn new(prompt_str: &'a str, path: PathBuf) -> Shell<'a> {
         Shell {
             cmd_prompt: prompt_str,
-            working_dir: path
+            working_dir: path,
+            history: History::new(100)
         }
     }
 
@@ -30,10 +34,13 @@ impl<'a> Shell<'a> {
             let mut line = String::new();
 
             stdin.read_line(&mut line).unwrap();
-            let cmd_line = line.trim();
-            let program = cmd_line.splitn(1, ' ').nth(0).expect("no program");
+            {
+                let cmd_line = line.trim();
+                let program = cmd_line.splitn(1, ' ').nth(0).expect("no program");
 
-            self.run_program(program)
+                self.run_program(program);
+            }
+            self.history.add(line);
         }
     }
 

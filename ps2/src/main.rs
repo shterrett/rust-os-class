@@ -21,6 +21,7 @@ mod program;
 mod builtin;
 mod shell;
 use shell::Shell;
+mod history;
 
 fn get_cmdline_from_args() -> Option<String> {
     /* Begin processing program arguments and initiate the parameters. */

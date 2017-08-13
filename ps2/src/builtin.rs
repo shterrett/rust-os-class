@@ -11,6 +11,7 @@ lazy_static! {
         builtins.insert("exit");
         builtins.insert("cd");
         builtins.insert("pwd");
+        builtins.insert("history");
         builtins
     };
 }
@@ -38,6 +39,7 @@ impl<'a> Builtin<'a> {
             "exit" => exit(0),
             "cd" => run_cd(&self.args, shell),
             "pwd" => run_pwd(shell),
+            "history" => run_history(&self.args, shell),
             _ => panic!()
         }
     }
