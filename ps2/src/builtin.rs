@@ -21,6 +21,7 @@ pub fn builtin_exists(cmd_path: &str) -> bool {
 }
 
 
+#[derive(PartialEq, Eq, Debug)]
 pub struct Builtin<'a> {
     name: &'a str,
     args: Vec<&'a str>
