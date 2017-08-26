@@ -1,39 +1,23 @@
 use std::process::Command;
 use builtin::{ builtin_exists, Builtin };
+use cmd_line::CmdLine;
 
 pub enum Program<'a> {
     Internal(Builtin<'a>),
     External((&'a str, Vec<&'a str>)),
-    NotFound
+    NotFound(&'a str)
 }
 
-pub fn resolve_program<'a>(cmd: &'a str) -> Program<'a> {
-    if let  Some((cmd_path, args)) = cmd_and_args(cmd) {
-        if builtin_exists(cmd_path) {
-            Program::Internal(
-                Builtin::new(cmd_path, args)
-            )
-        } else if cmd_exists(cmd_path) {
-            Program::External((cmd_path, args))
-        } else {
-            Program::NotFound
-        }
+pub fn resolve_program<'a>(cmd_line: CmdLine<'a>) -> Program<'a> {
+    if builtin_exists(cmd_line.name) {
+        Program::Internal(
+            Builtin::new(cmd_line.name, cmd_line.args)
+        )
+    } else if cmd_exists(cmd_line.name) {
+        Program::External((cmd_line.name, cmd_line.args))
     } else {
-        Program::NotFound
+        Program::NotFound(cmd_line.name)
     }
-}
-
-fn cmd_and_args<'a>(cmd: &'a str) -> Option<(&'a str, Vec<&'a str>)> {
-    let argv: Vec<&str> = cmd.split(' ').filter_map(|x| {
-        if x == "" {
-            None
-        } else {
-            Some(x)
-        }
-    }).collect();
-
-    argv.split_first()
-        .map(|(&name, args)| (name, args.to_vec()))
 }
 
 fn cmd_exists(cmd_path: &str) -> bool {
@@ -46,16 +30,9 @@ mod test {
     use super::{
         Program,
         cmd_exists,
-        cmd_and_args,
         resolve_program
     };
-
-    #[test]
-    fn splits_a_string_into_command_and_arguments() {
-        let command = "ls -l";
-
-        assert_eq!(cmd_and_args(command), Some(("ls", vec!["-l"])));
-    }
+    use cmd_line::CmdLine;
 
     #[test]
     // This test assumes `ls` exists
@@ -67,7 +44,7 @@ mod test {
 
     #[test]
     fn returns_the_builtin_program() {
-        let command = "cd /usr/bin";
+        let command = CmdLine::parse("cd /usr/bin").unwrap();
         let program = resolve_program(command);
 
         match program {
@@ -83,7 +60,7 @@ mod test {
     #[test]
     // This test assumes `ls` exists
     fn returns_external_program() {
-        let command = "ls -al";
+        let command = CmdLine::parse("ls -al").unwrap();
         let program = resolve_program(command);
 
         match program {
@@ -98,13 +75,13 @@ mod test {
     }
 
     #[test]
-    // This test assumez `not-a-command` does not exist
+    // This test assumes `not-a-command` does not exist
     fn returns_not_found_for_nonexistant_command() {
-        let command = "not-a-command";
+        let command = CmdLine::parse("not-a-command").unwrap();
         let program = resolve_program(command);
 
         match program {
-            Program::NotFound =>  assert!(true),
+            Program::NotFound(_) =>  assert!(true),
             _ => assert!(false, "wrong program type")
         }
     }

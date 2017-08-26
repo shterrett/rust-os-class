@@ -1,11 +1,12 @@
 use std::io::{ self, Write };
 use std::path::PathBuf;
-use std::process::Command;
 use program::{
     Program,
     resolve_program
 };
 use history::History;
+use cmd_line::CmdLine;
+use external::run_external;
 
 
 pub struct Shell<'a> {
@@ -45,22 +46,24 @@ impl<'a> Shell<'a> {
     }
 
     pub fn run_program(&mut self, program: &str) {
-        match resolve_program(program) {
-            Program::NotFound => {
-                println!("{} not found", program);
+        match CmdLine::parse(program) {
+            Some(cmd_line) => self.execute(cmd_line),
+            None => println!("invalid command")
+        };
+    }
+
+    pub fn execute(&mut self, cmd_line: CmdLine) {
+        let background = cmd_line.background;
+
+        match resolve_program(cmd_line) {
+            Program::NotFound(name) => {
+                println!("{} not found", name);
             },
             Program::Internal(builtin) => {
                 builtin.run(self);
             },
             Program::External((cmd_path, args)) => {
-                io::stdout()
-                    .write(&Command::new(cmd_path)
-                           .args(args)
-                           .current_dir(self.working_dir.clone())
-                           .output()
-                           .unwrap()
-                           .stdout)
-                    .unwrap();
+                run_external(self, cmd_path, args, background);
             }
         }
     }

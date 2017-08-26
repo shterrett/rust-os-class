@@ -49,10 +49,6 @@ impl<'a> Builtin<'a> {
 fn run_cd(args: &Vec<&str>, shell: &mut Shell) {
     let new_path =
         args.first()
-            .map(|p| {
-                println!("{:?}", p);
-                p
-            })
             .map(|s| Path::new(s))
             .and_then(|p| {
                 if p.is_absolute() {
