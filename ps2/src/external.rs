@@ -1,12 +1,13 @@
 use std::io::{ self, Write };
 use std::process::Command;
 use shell::Shell;
+use cmd_line::CmdLine;
 
-pub fn run_external(shell: &Shell, cmd_path: &str, args:  Vec<&str>, background: bool) {
-    if background {
-        run_bg(shell, cmd_path, args);
+pub fn run(cmd: CmdLine, shell: &Shell) {
+    if cmd.background {
+        run_bg(shell, cmd.name, cmd.args);
     } else {
-        run_fg(shell, cmd_path, args);
+        run_fg(shell, cmd.name, cmd.args);
     }
 }
 

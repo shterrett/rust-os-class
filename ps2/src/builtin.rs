@@ -4,6 +4,7 @@ use std::path::{ Path };
 use std::env::home_dir;
 
 use shell::Shell;
+use cmd_line::CmdLine;
 
 lazy_static! {
     static ref BUILTINS: HashSet<&'static str> = {
@@ -20,29 +21,13 @@ pub fn builtin_exists(cmd_path: &str) -> bool {
     BUILTINS.contains(cmd_path)
 }
 
-
-#[derive(PartialEq, Eq, Debug)]
-pub struct Builtin<'a> {
-    name: &'a str,
-    args: Vec<&'a str>
-}
-
-impl<'a> Builtin<'a> {
-    pub fn new(name: &'a str, args: Vec<&'a str>) -> Self {
-        Builtin {
-            name: name,
-            args: args
-        }
-    }
-
-    pub fn run(&self, shell: &mut Shell) {
-        match self.name {
-            "exit" => exit(0),
-            "cd" => run_cd(&self.args, shell),
-            "pwd" => run_pwd(shell),
-            "history" => run_history(&self.args, shell),
-            _ => panic!()
-        }
+pub fn run(cmd: CmdLine, shell: &mut Shell) {
+    match cmd.name {
+        "exit" => exit(0),
+        "cd" => run_cd(&cmd.args, shell),
+        "pwd" => run_pwd(shell),
+        "history" => run_history(&cmd.args, shell),
+        _ => panic!()
     }
 }
 

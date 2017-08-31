@@ -1,20 +1,18 @@
 use std::process::Command;
-use builtin::{ builtin_exists, Builtin };
+use builtin::builtin_exists;
 use cmd_line::CmdLine;
 
 pub enum Program<'a> {
-    Internal(Builtin<'a>),
-    External((&'a str, Vec<&'a str>)),
+    Internal(CmdLine<'a>),
+    External(CmdLine<'a>),
     NotFound(&'a str)
 }
 
 pub fn resolve_program<'a>(cmd_line: CmdLine<'a>) -> Program<'a> {
     if builtin_exists(cmd_line.name) {
-        Program::Internal(
-            Builtin::new(cmd_line.name, cmd_line.args)
-        )
+        Program::Internal(cmd_line)
     } else if cmd_exists(cmd_line.name) {
-        Program::External((cmd_line.name, cmd_line.args))
+        Program::External(cmd_line)
     } else {
         Program::NotFound(cmd_line.name)
     }
@@ -26,7 +24,6 @@ fn cmd_exists(cmd_path: &str) -> bool {
 
 #[cfg(test)]
 mod test {
-    use builtin::Builtin;
     use super::{
         Program,
         cmd_exists,
@@ -45,11 +42,11 @@ mod test {
     #[test]
     fn returns_the_builtin_program() {
         let command = CmdLine::parse("cd /usr/bin").unwrap();
-        let program = resolve_program(command);
+        let program = resolve_program(command.clone());
 
         match program {
             Program::Internal(builtin) => {
-                assert_eq!(builtin, Builtin::new("cd", vec!["/usr/bin"]));
+                assert_eq!(builtin, command);
             },
             _ => {
                 assert!(false, "wrong program type");
@@ -64,9 +61,9 @@ mod test {
         let program = resolve_program(command);
 
         match program {
-            Program::External((cmd, args)) => {
-                assert_eq!(cmd, "ls");
-                assert_eq!(args, vec!["-al"]);
+            Program::External(cmd) => {
+                assert_eq!(cmd.name, "ls");
+                assert_eq!(cmd.args, vec!["-al"]);
             },
             _ => {
                 assert!(false, "wrong program type");

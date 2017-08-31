@@ -6,7 +6,8 @@ use program::{
 };
 use history::History;
 use cmd_line::CmdLine;
-use external::run_external;
+use external;
+use builtin;
 
 
 pub struct Shell<'a> {
@@ -47,23 +48,21 @@ impl<'a> Shell<'a> {
 
     pub fn run_program(&mut self, program: &str) {
         match CmdLine::parse(program) {
-            Some(cmd_line) => self.execute(cmd_line),
-            None => println!("invalid command")
+            Ok(cmd_line) => self.execute(cmd_line),
+            Err(e) => println!("invalid command: {}", e)
         };
     }
 
     pub fn execute(&mut self, cmd_line: CmdLine) {
-        let background = cmd_line.background;
-
         match resolve_program(cmd_line) {
             Program::NotFound(name) => {
                 println!("{} not found", name);
             },
-            Program::Internal(builtin) => {
-                builtin.run(self);
+            Program::Internal(cmd) => {
+                builtin::run(cmd, self);
             },
-            Program::External((cmd_path, args)) => {
-                run_external(self, cmd_path, args, background);
+            Program::External(cmd) => {
+                external::run(cmd, self);
             }
         }
     }
