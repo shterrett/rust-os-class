@@ -23,17 +23,19 @@ pub fn builtin_exists(cmd_path: &str) -> bool {
     BUILTINS.contains(cmd_path)
 }
 
-pub fn run(cmd: CmdLine, shell: &mut Shell) {
+pub fn run<'a>(cmd: &'a CmdLine, shell: &mut Shell) -> Result<(), String> {
     match cmd.name {
         "exit" => exit(0),
         "cd" => run_cd(&cmd, shell),
         "pwd" => run_pwd(&cmd, shell),
         "history" => run_history(&cmd, shell),
-        _ => panic!()
+        _ => {
+            Err(format!("Command not found {}", cmd.name))
+        }
     }
 }
 
-fn run_cd(cmd: &CmdLine, shell: &mut Shell) {
+fn run_cd<'a>(cmd: &'a CmdLine, shell: &mut Shell) -> Result<(), String> {
     let args = &cmd.args;
     let new_path =
         args.first()
@@ -65,21 +67,27 @@ fn run_cd(cmd: &CmdLine, shell: &mut Shell) {
                 }
             });
 
-    if let Some(path) = new_path {
+    match new_path {
+        Some(path) => {
             shell.working_dir = path;
+            Ok(())
+        },
+        None => Err(format!("Path not found"))
     }
 }
 
-fn run_pwd(cmd: &CmdLine, shell: &Shell) {
+fn run_pwd<'a>(cmd: &'a CmdLine, shell: &Shell) -> Result<(), String>{
     shell.working_dir
         .to_str()
-        .map(|dir| output(format!("{}", dir), cmd.stdout));
+        .map(|dir| output(format!("{}", dir), cmd.stdout))
+        .ok_or("Error resolving current directory".to_string())
 }
 
-fn run_history(cmd: &CmdLine, shell: &Shell) {
+fn run_history<'a>(cmd: &'a CmdLine, shell: &Shell) -> Result<(), String> {
     for cmd_line in shell.history.list(10) {
         output(format!("{}", cmd_line), cmd.stdout);
     }
+    Ok(())
 }
 
 fn output(text: String, stdout: Option<&Path>) {
@@ -109,8 +117,9 @@ mod test {
         let mut shell = Shell::new(">", Path::new("/").to_path_buf());
         let cmd = CmdLine::parse("cd usr").unwrap();
 
-        run_cd(&cmd, &mut shell);
+        let result = run_cd(&cmd, &mut shell);
 
+        assert_eq!(Ok(()), result);
         assert_eq!(shell.working_dir, Path::new("/usr").to_path_buf());
     }
 
@@ -119,8 +128,9 @@ mod test {
         let mut shell = Shell::new(">", Path::new("/usr").to_path_buf());
         let cmd = CmdLine::parse("cd /usr/bin").unwrap();
 
-        run_cd(&cmd, &mut shell);
+        let result = run_cd(&cmd, &mut shell);
 
+        assert_eq!(Ok(()), result);
         assert_eq!(shell.working_dir, Path::new("/usr/bin").to_path_buf());
     }
 
@@ -129,8 +139,9 @@ mod test {
         let mut shell = Shell::new(">", Path::new("/usr/bin").to_path_buf());
         let cmd = CmdLine::parse("cd ..").unwrap();
 
-        run_cd(&cmd, &mut shell);
+        let result = run_cd(&cmd, &mut shell);
 
+        assert_eq!(Ok(()), result);
         assert_eq!(shell.working_dir, Path::new("/usr").to_path_buf());
     }
 
@@ -139,8 +150,9 @@ mod test {
         let mut shell = Shell::new(">", Path::new("/usr/bin").to_path_buf());
         let cmd = CmdLine::parse("cd ~/").unwrap();
 
-        run_cd(&cmd, &mut shell);
+        let result = run_cd(&cmd, &mut shell);
 
+        assert_eq!(Ok(()), result);
         assert_eq!(shell.working_dir, home_dir().unwrap());
     }
 

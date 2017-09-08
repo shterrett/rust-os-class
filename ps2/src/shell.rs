@@ -54,16 +54,20 @@ impl<'a> Shell<'a> {
     }
 
     pub fn execute(&mut self, cmd_line: CmdLine) {
-        match resolve_program(cmd_line) {
+        let result = match resolve_program(cmd_line) {
             Program::NotFound(name) => {
-                println!("{} not found", name);
+                Err(format!("{} not found", name))
             },
             Program::Internal(cmd) => {
-                builtin::run(cmd, self);
+                builtin::run(&cmd, self)
             },
             Program::External(cmd) => {
-                external::run(cmd, self);
+                external::run(&cmd, self)
             }
+        };
+
+        if let Err(e) = result {
+            println!("{}", e);
         }
     }
 }
