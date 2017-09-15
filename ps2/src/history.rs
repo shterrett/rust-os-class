@@ -34,16 +34,6 @@ mod test {
     use super::History;
 
     #[test]
-    fn last_returns_most_recently_added_items_and_does_not_pop() {
-        let mut history = History::new(4);
-        history.add("Hello world".to_string());
-        history.add("Goodbye world".to_string());
-
-        assert_eq!(history.last().unwrap(), "Goodbye world");
-        assert_eq!(history.last().unwrap(), "Goodbye world");
-    }
-
-    #[test]
     fn list_returns_most_recent_n_items_and_does_not_pop() {
         let mut history = History::new(4);
         history.add("Hello world".to_string());

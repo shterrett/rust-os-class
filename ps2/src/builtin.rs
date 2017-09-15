@@ -6,7 +6,7 @@ use std::io::{ self, Write };
 use std::fs::File;
 
 use shell::Shell;
-use cmd_line::CmdLine;
+use cmd_line::{ CmdLine, CmdIO };
 
 lazy_static! {
     static ref BUILTINS: HashSet<&'static str> = {
@@ -79,25 +79,29 @@ fn run_cd<'a>(cmd: &'a CmdLine, shell: &mut Shell) -> Result<(), String> {
 fn run_pwd<'a>(cmd: &'a CmdLine, shell: &Shell) -> Result<(), String>{
     shell.working_dir
         .to_str()
-        .map(|dir| output(format!("{}", dir), cmd.stdout))
+        .map(|dir| output(format!("{}", dir), &cmd.stdout))
         .ok_or("Error resolving current directory".to_string())
 }
 
 fn run_history<'a>(cmd: &'a CmdLine, shell: &Shell) -> Result<(), String> {
     for cmd_line in shell.history.list(10) {
-        output(format!("{}", cmd_line), cmd.stdout);
+        output(format!("{}", cmd_line), &cmd.stdout);
     }
     Ok(())
 }
 
-fn output(text: String, stdout: Option<&Path>) {
+fn output(text: String, stdout: &CmdIO) {
     match stdout {
-        None =>  {
+        &CmdIO::Console =>  {
             let _ = io::stdout().write(text.as_bytes());
         },
-        Some(path) => {
+        &CmdIO::File(path) => {
              let _ = File::create(path)
                   .and_then(|mut f| f.write_all(text.as_bytes()));
+        },
+        &CmdIO::Pipe => {
+            //TODO FIXME
+            let _ = io::stdout().write(text.as_bytes());
         }
     }
 }
@@ -106,7 +110,7 @@ fn output(text: String, stdout: Option<&Path>) {
 mod test {
     use super::{ run_cd, output };
     use shell::Shell;
-    use cmd_line::CmdLine;
+    use cmd_line::{ CmdLine, CmdIO };
     use std::path::Path;
     use std::env::home_dir;
     use std::fs::{ File, remove_file };
@@ -159,7 +163,7 @@ mod test {
     #[test] fn redirects_std_out() {
         let path = Path::new("test/redirect_std_out.txt");
 
-        output("Command Output".to_string(), Some(&path));
+        output("Command Output".to_string(), &CmdIO::File(&path));
 
         let mut output = "".to_string();
         let _ = File::open(path)

@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{ Command, Stdio };
 use builtin::builtin_exists;
 use cmd_line::CmdLine;
 
@@ -19,7 +19,13 @@ pub fn resolve_program<'a>(cmd_line: CmdLine<'a>) -> Program<'a> {
 }
 
 fn cmd_exists(cmd_path: &str) -> bool {
-    Command::new("which").arg(cmd_path).status().unwrap().success()
+    Command::new("which")
+        .arg(cmd_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .unwrap()
+        .success()
 }
 
 #[cfg(test)]

@@ -1,11 +1,12 @@
 use std::io::{ self, Write };
+use std::error::Error;
 use std::path::PathBuf;
 use program::{
     Program,
     resolve_program
 };
 use history::History;
-use cmd_line::CmdLine;
+use cmd_line::{ CmdLine, ParsedCommand, parse_command };
 use external;
 use builtin;
 
@@ -47,10 +48,37 @@ impl<'a> Shell<'a> {
     }
 
     pub fn run_program(&mut self, program: &str) {
-        match CmdLine::parse(program) {
-            Ok(cmd_line) => self.execute(cmd_line),
+        match parse_command(program) {
+            Ok(ParsedCommand::SingleCommand(cmd_line)) => self.execute(cmd_line),
+            Ok(ParsedCommand::PipeChain(cmds)) => self.execute_chain(cmds),
             Err(e) => println!("invalid command: {}", e)
         };
+    }
+
+    pub fn execute_chain(&mut self, cmds: Vec<CmdLine>) {
+        let invalid = cmds.iter().filter_map(|cmd| {
+            match resolve_program(cmd.clone()) {
+                Program::NotFound(name) => Some(Program::NotFound(name)),
+                Program::Internal(cmd) => Some(Program::Internal(cmd)),
+                Program::External(_) => None
+            }
+        }).collect::<Vec<Program>>();
+
+        if !invalid.is_empty() {
+            println!("invalid pipe chain");
+            for cmd in invalid {
+                match cmd {
+                    Program::NotFound(name) => println!("Not found: {}", name),
+                    Program::Internal(cmd) => println!("Not pipeable: {}", cmd.name),
+                    Program::External(_) => ()
+                }
+            }
+        } else {
+            let child = external::run_chain(&cmds, self);
+            if let Err(e) = child.and_then(|mut c| c.wait().map_err(|e| e.description().to_string())).map(|_| ()) {
+                println!("{}", e);
+            }
+        }
     }
 
     pub fn execute(&mut self, cmd_line: CmdLine) {
@@ -62,7 +90,12 @@ impl<'a> Shell<'a> {
                 builtin::run(&cmd, self)
             },
             Program::External(cmd) => {
-                external::run(&cmd, self)
+                let child = external::run(&cmd, self);
+                if !cmd.background {
+                    child.and_then(|mut c| c.wait().map_err(|e| e.description().to_string())).map(|_| ())
+                } else {
+                    child.map(|_| ())
+                }
             }
         };
 
