@@ -115,10 +115,11 @@ mod test {
     use std::env::home_dir;
     use std::fs::{ File, remove_file };
     use std::io::Read;
+    use std::sync::{ Arc, Mutex };
 
     #[test]
     fn changes_working_directory_to_relative_path() {
-        let mut shell = Shell::new(">", Path::new("/").to_path_buf());
+        let mut shell = Shell::new(">", Path::new("/").to_path_buf(), Arc::new(Mutex::new(None)));
         let cmd = CmdLine::parse("cd usr").unwrap();
 
         let result = run_cd(&cmd, &mut shell);
@@ -129,7 +130,7 @@ mod test {
 
     #[test]
     fn changes_working_directory_to_absolute_path() {
-        let mut shell = Shell::new(">", Path::new("/usr").to_path_buf());
+        let mut shell = Shell::new(">", Path::new("/usr").to_path_buf(), Arc::new(Mutex::new(None)));
         let cmd = CmdLine::parse("cd /usr/bin").unwrap();
 
         let result = run_cd(&cmd, &mut shell);
@@ -140,7 +141,7 @@ mod test {
 
     #[test]
     fn resolves_parent_dir_references() {
-        let mut shell = Shell::new(">", Path::new("/usr/bin").to_path_buf());
+        let mut shell = Shell::new(">", Path::new("/usr/bin").to_path_buf(), Arc::new(Mutex::new(None)));
         let cmd = CmdLine::parse("cd ..").unwrap();
 
         let result = run_cd(&cmd, &mut shell);
@@ -151,7 +152,7 @@ mod test {
 
     #[test]
     fn resolves_home_dir_references() {
-        let mut shell = Shell::new(">", Path::new("/usr/bin").to_path_buf());
+        let mut shell = Shell::new(">", Path::new("/usr/bin").to_path_buf(), Arc::new(Mutex::new(None)));
         let cmd = CmdLine::parse("cd ~/").unwrap();
 
         let result = run_cd(&cmd, &mut shell);
