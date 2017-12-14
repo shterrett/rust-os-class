@@ -1,16 +1,15 @@
 ps3
 ===
 
-Starting code for Problem Set 3 of CS4414.  
+The provided rust code is old enough that it doesn't remotely compile. Instead,
+I am starting over with the ps1 codeand writing a webserver that meets the following
+requirements:
 
-Includes:
-
-- zhtta.rs: starting code for Zhtta web server.
-
-- gash.rs: reference solution for PS2, that you can use for your
-  embedded shell (but feel free to use your own gash if you prefer).
-
-- zhtta-test.txt: list of test URLs
-
-- www/index.shtml: a simple test file
-
++ returns static html files for GET requests
++ counts (safely) the number of visitors
++ interpolate the result of a shell command into an shtml response
++ handles multiple concurrent requests
++ preferentially scheduling requests from a particular IP range
++ schedules responses to prioritize fastest expected response times
++ stream file responses
++ cache files in memory
