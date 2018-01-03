@@ -28,7 +28,7 @@ enum AccessError {
     TypeNotAllowed
 }
 
-pub fn handle_request<T: Write>(path: ReqPath, visitor_count: u16, stream: &mut T) -> http::Status {
+pub fn handle_request<T: Write>(path: ReqPath, visitor_count: usize, stream: &mut T) -> http::Status {
     let response_status =
         router(path, visitor_count)
             .and_then(|bytes|{
@@ -50,14 +50,14 @@ pub fn handle_request<T: Write>(path: ReqPath, visitor_count: u16, stream: &mut 
     }
 }
 
-fn router(path: ReqPath, visitor_count: u16) -> Result<Vec<u8>, http::Status> {
+fn router(path: ReqPath, visitor_count: usize) -> Result<Vec<u8>, http::Status> {
     match path {
         ReqPath::Root => root_handler(visitor_count),
         ReqPath::RelPath(path) => file_handler(path)
     }
 }
 
-fn root_handler(visitor_count: u16) -> Result<Vec<u8>, http::Status> {
+fn root_handler(visitor_count: usize) -> Result<Vec<u8>, http::Status> {
     let response =
         format!("<doctype !html><html><head><title>Hello, Rust!</title>
                 <style>body {{ background-color: #111; color: #FFEEAA }}
