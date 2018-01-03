@@ -23,6 +23,9 @@ use std::thread;
 mod path;
 mod handler;
 mod http;
+mod shell_interpolation;
+mod cmd_line;
+mod external;
 
 fn main() {
     let addr = "127.0.0.1:4414";

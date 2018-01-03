@@ -4,10 +4,12 @@ use std::fs::File;
 use std::path::{ Path, Component };
 use path::Path as ReqPath;
 use http;
+use shell_interpolation::insert_shell_commands;
 
 lazy_static!{
     static ref ALLOWED_FILE_TYPES: HashSet<&'static str> = {
         let mut s = HashSet::new();
+        s.insert("shtml");
         s.insert("html");
         s.insert("css");
         s.insert("js");
@@ -73,7 +75,8 @@ fn root_handler(visitor_count: u16) -> Result<Vec<u8>, http::Status> {
 
 fn file_handler(path: String) -> Result<Vec<u8>, http::Status> {
     let mut bytes: Vec<u8> = Vec::new();
-    valid_file(Path::new(&path))
+    let file_path = Path::new(&path);
+    valid_file(&file_path)
         .and_then(|mut f| {
             f.read_to_end(&mut bytes)
                 .map_err(|_| AccessError::NotFound)
@@ -86,6 +89,7 @@ fn file_handler(path: String) -> Result<Vec<u8>, http::Status> {
                 AccessError::TypeNotAllowed => http::Status::NotAuthorized
             }
         })
+        .and_then(|b| insert_shell_commands(&file_path, b).map_err(|_| http::Status::Error))
 }
 
 fn valid_file(path: &Path) -> Result<File, AccessError> {
@@ -203,6 +207,17 @@ mod test {
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
+
+        assert!(response.is_match(&html));
+    }
+
+    #[test]
+    fn interpolates_shell_command_in_shtml() {
+        let mut output: Vec<u8> = Vec::new();
+        handle_request(Path::RelPath("test/world.shtml".to_string()), 6, &mut output);
+
+        let html = String::from_utf8(output).unwrap();
+        let response = Regex::new("<h1>\"Hello World\"\n</h1>").unwrap();
 
         assert!(response.is_match(&html));
     }
