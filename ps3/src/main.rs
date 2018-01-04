@@ -15,8 +15,7 @@
 extern crate lazy_static;
 extern crate regex;
 
-use std::io::Read;
-use std::net::{ TcpListener, TcpStream };
+use std::net::TcpListener;
 use std::str;
 use std::thread;
 use std::sync::{ Arc, Mutex };
@@ -29,16 +28,18 @@ mod shell_interpolation;
 mod cmd_line;
 mod external;
 mod scheduling;
+mod request;
 
-use scheduling::{ schedule, queues, FastLane, SlowLane };
+use scheduling::{ schedule, queues, IpAddressable };
+use request::{ build_request, Request };
 
 fn main() {
     let addr = "127.0.0.1:4414";
     let listener = TcpListener::bind(addr).unwrap();
     let visitor_count: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
     let (hq, lq) = queues();
-    let high_priority: Arc<Mutex<FastLane>> = Arc::new(Mutex::new(hq));
-    let low_priority: Arc<Mutex<SlowLane>> = Arc::new(Mutex::new(lq));
+    let high_priority = Arc::new(Mutex::new(hq));
+    let low_priority = Arc::new(Mutex::new(lq));
 
     println!("Listening on [{}] ...", addr);
 
@@ -48,8 +49,8 @@ fn main() {
         thread::spawn(move || {
             loop {
                 let mut queue = high.lock().unwrap();
-                if let Some(stream) = queue.pop().map(|s| s.stream) {
-                    handle_incoming(stream, count.load(Ordering::Relaxed));
+                if let Some(request) = queue.pop().map(|s| s.request) {
+                    handle_incoming(request, count.load(Ordering::Relaxed));
                 } else {
                     thread::yield_now();
                 }
@@ -62,8 +63,8 @@ fn main() {
         thread::spawn(move || {
             loop {
                 let mut queue = low.lock().unwrap();
-                if let Some(stream) = queue.pop().map(|s| s.stream) {
-                    handle_incoming(stream, count.load(Ordering::Relaxed));
+                if let Some(request) = queue.pop().map(|s| s.request) {
+                    handle_incoming(request, count.load(Ordering::Relaxed));
                 } else {
                     thread::yield_now();
                 }
@@ -79,7 +80,8 @@ fn main() {
 
                 let mut high_queue = high_priority.lock().unwrap();
                 let mut low_queue = low_priority.lock().unwrap();
-                schedule(stream, &mut high_queue, &mut low_queue)
+                let request = build_request(stream);
+                schedule(request, &mut high_queue, &mut low_queue)
             }
         }
     }
@@ -87,25 +89,14 @@ fn main() {
     drop(listener);
 }
 
-fn handle_incoming(mut stream: TcpStream, visitor_count: usize) {
-    match stream.peer_addr() {
+fn handle_incoming(mut request: Request, visitor_count: usize) {
+    match request.ip_address() {
         Err(_) => (),
         Ok(pn) => println!("Received connection from: [{}]", pn),
     }
 
-    let mut buf = [0 ;500];
-    stream.read(&mut buf).unwrap();
-    match str::from_utf8(&buf) {
-        Err(error) => println!("Received request error:\n{}", error),
-        Ok(body) => {
-            let req_path = path::path(body);
-            println!("Recieved request body:\n{}", body);
-            println!("Requested Path: {}\n", req_path);
-            let status = handler::handle_request(req_path, visitor_count, &mut stream);
-            println!("Response Status: {}", status);
-        }
-    }
-
+    let status = handler::handle_request(request.path, visitor_count, &mut request.stream);
+    println!("Response Status: {}", status);
     println!("Connection terminates.");
 }
 

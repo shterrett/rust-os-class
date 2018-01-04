@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::io::{ Read, Write };
+use std::io;
 use std::fs::File;
 use std::path::{ Path, Component };
 use path::Path as ReqPath;
@@ -28,25 +29,30 @@ enum AccessError {
     TypeNotAllowed
 }
 
-pub fn handle_request<T: Write>(path: ReqPath, visitor_count: usize, stream: &mut T) -> http::Status {
-    let response_status =
-        router(path, visitor_count)
-            .and_then(|bytes|{
-                let header = http::header(&http::Status::Ok);
-                stream.write(&header)
-                    .and_then(|_| stream.write(&bytes))
-                    .map_err(|_| http::Status::Error)
-            })
-            .map_err(|e| {
-                match stream.write(&http::header(&e)) {
-                    Ok(_) => e,
-                    Err(_) => http::Status::Error
-                }
-            });
+pub fn handle_request<T: Write>(req_path: io::Result<ReqPath>, visitor_count: usize, stream: &mut T) -> http::Status {
+    match req_path {
+        Ok(path) => {
+            let response_status =
+                router(path, visitor_count)
+                    .and_then(|bytes|{
+                        let header = http::header(&http::Status::Ok);
+                        stream.write(&header)
+                            .and_then(|_| stream.write(&bytes))
+                            .map_err(|_| http::Status::Error)
+                    })
+                    .map_err(|e| {
+                        match stream.write(&http::header(&e)) {
+                            Ok(_) => e,
+                            Err(_) => http::Status::Error
+                        }
+                    });
 
-    match response_status {
-        Ok(_) => http::Status::Ok,
-        Err(e) => e
+                match response_status {
+                    Ok(_) => http::Status::Ok,
+                    Err(e) => e
+                }
+        }
+        Err(_) => http::Status::Error
     }
 }
 
@@ -117,11 +123,13 @@ mod test {
     use regex::Regex;
     use path::Path;
     use super::handle_request;
+    use http::Status;
+    use std::io;
 
     #[test]
     fn root_handler_writes_html() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::Root, 5, &mut output);
+        handle_request(Ok(Path::Root), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
 
@@ -135,7 +143,7 @@ mod test {
     #[test]
     fn file_handler_returns_given_file() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::RelPath("test/response.html".to_string()), 5, &mut output);
+        handle_request(Ok(Path::RelPath("test/response.html".to_string())), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
 
@@ -147,7 +155,7 @@ mod test {
     #[test]
     fn fails_for_nonexistent_file() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::RelPath("test/does_not_exist.html".to_string()), 5, &mut output);
+        handle_request(Ok(Path::RelPath("test/does_not_exist.html".to_string())), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
 
@@ -159,7 +167,7 @@ mod test {
     #[test]
     fn fails_for_root_access() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::RelPath("/etc/hosts".to_string()), 5, &mut output);
+        handle_request(Ok(Path::RelPath("/etc/hosts".to_string())), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -170,7 +178,7 @@ mod test {
     #[test]
     fn fails_for_parent_dir_access() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::RelPath("../README.md".to_string()), 6, &mut output);
+        handle_request(Ok(Path::RelPath("../README.md".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -181,7 +189,7 @@ mod test {
     #[test]
     fn fails_for_embedded_parent_dir_access() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::RelPath("test/../../index.html".to_string()), 6, &mut output);
+        handle_request(Ok(Path::RelPath("test/../../index.html".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -192,7 +200,7 @@ mod test {
     #[test]
     fn fails_for_unallowed_file_type() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::RelPath("test/passwords.txt".to_string()), 6, &mut output);
+        handle_request(Ok(Path::RelPath("test/passwords.txt".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -203,7 +211,7 @@ mod test {
     #[test]
     fn not_authorized_supersedes_not_found() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::RelPath("test/does_not_exist.txt".to_string()), 6, &mut output);
+        handle_request(Ok(Path::RelPath("test/does_not_exist.txt".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -214,11 +222,19 @@ mod test {
     #[test]
     fn interpolates_shell_command_in_shtml() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Path::RelPath("test/world.shtml".to_string()), 6, &mut output);
+        handle_request(Ok(Path::RelPath("test/world.shtml".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new("<h1>\"Hello World\"\n</h1>").unwrap();
 
         assert!(response.is_match(&html));
+    }
+
+    #[test]
+    fn returns_error_if_path_not_parsed() {
+        let mut output: Vec<u8> = Vec::new();
+        let status = handle_request(Err(io::Error::new(io::ErrorKind::Other, "Whoops")), 6, &mut output);
+
+        assert_eq!(status, Status::Error);
     }
 }

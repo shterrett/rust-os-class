@@ -10,6 +10,6 @@ requirements:
 + interpolate the result of a shell command into an shtml response (DONE)
 + handles multiple concurrent requests (DONE)
 + preferentially scheduling requests from a particular IP range (DONE)
-+ schedules responses to prioritize fastest expected response times
++ schedules responses to prioritize fastest expected response times (DONE)
 + stream file responses
 + cache files in memory

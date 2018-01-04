@@ -1,5 +1,6 @@
 use std::fmt;
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum Status {
     Ok,
     FileNotFound,
