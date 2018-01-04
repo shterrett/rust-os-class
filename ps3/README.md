@@ -9,7 +9,7 @@ requirements:
 + counts (safely) the number of visitors (DONE)
 + interpolate the result of a shell command into an shtml response (DONE)
 + handles multiple concurrent requests (DONE)
-+ preferentially scheduling requests from a particular IP range
++ preferentially scheduling requests from a particular IP range (DONE)
 + schedules responses to prioritize fastest expected response times
 + stream file responses
 + cache files in memory

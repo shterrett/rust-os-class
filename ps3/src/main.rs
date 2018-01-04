@@ -16,7 +16,7 @@ extern crate lazy_static;
 extern crate regex;
 
 use std::io::Read;
-use std::net::{ TcpListener, TcpStream, SocketAddr };
+use std::net::{ TcpListener, TcpStream };
 use std::str;
 use std::thread;
 use std::sync::{ Arc, Mutex };
@@ -28,18 +28,17 @@ mod http;
 mod shell_interpolation;
 mod cmd_line;
 mod external;
+mod scheduling;
 
-enum Priority {
-    High,
-    Low
-}
+use scheduling::{ schedule, queues, FastLane, SlowLane };
 
 fn main() {
     let addr = "127.0.0.1:4414";
     let listener = TcpListener::bind(addr).unwrap();
     let visitor_count: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
-    let high_priority: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
-    let low_priority: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    let (hq, lq) = queues();
+    let high_priority: Arc<Mutex<FastLane>> = Arc::new(Mutex::new(hq));
+    let low_priority: Arc<Mutex<SlowLane>> = Arc::new(Mutex::new(lq));
 
     println!("Listening on [{}] ...", addr);
 
@@ -49,7 +48,7 @@ fn main() {
         thread::spawn(move || {
             loop {
                 let mut queue = high.lock().unwrap();
-                if let Some(stream) = queue.pop() {
+                if let Some(stream) = queue.pop().map(|s| s.stream) {
                     handle_incoming(stream, count.load(Ordering::Relaxed));
                 } else {
                     thread::yield_now();
@@ -63,7 +62,7 @@ fn main() {
         thread::spawn(move || {
             loop {
                 let mut queue = low.lock().unwrap();
-                if let Some(stream) = queue.pop() {
+                if let Some(stream) = queue.pop().map(|s| s.stream) {
                     handle_incoming(stream, count.load(Ordering::Relaxed));
                 } else {
                     thread::yield_now();
@@ -78,12 +77,9 @@ fn main() {
             Ok(stream) => {
                 safe_increment(&visitor_count);
 
-                let mut queue;
-                match stream_priority(&stream) {
-                    Priority::High => queue = high_priority.lock().unwrap(),
-                    Priority::Low => queue = low_priority.lock().unwrap()
-                }
-                queue.push(stream);
+                let mut high_queue = high_priority.lock().unwrap();
+                let mut low_queue = low_priority.lock().unwrap();
+                schedule(stream, &mut high_queue, &mut low_queue)
             }
         }
     }
@@ -117,22 +113,6 @@ fn safe_increment(visitor_count: &Arc<AtomicUsize>) {
     let current = visitor_count.load(Ordering::Relaxed);
     let changed = visitor_count.compare_and_swap(current, current + 1, Ordering::Relaxed);
     if current == changed { return; } else { safe_increment(visitor_count) }
-}
-
-fn stream_priority(stream: &TcpStream) -> Priority {
-    match stream.peer_addr() {
-        Err(_) => Priority::Low,
-        Ok(SocketAddr::V6(_)) => Priority::Low,
-        Ok(SocketAddr::V4(address)) => {
-            let octets = address.ip().octets();
-            let prefix = (octets[0], octets[1]);
-            if prefix == (128, 143) || prefix == (127, 54) {
-                Priority::High
-            } else {
-                Priority::Low
-            }
-        }
-    }
 }
 
 #[cfg(test)]
