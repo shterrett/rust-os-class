@@ -1,37 +1,44 @@
 use std::path::Path;
 use std::process::Child;
 use std::error::Error;
+use std::fs::File;
+use std::io::{ Read, BufReader };
 use regex::{ Regex, Captures };
 use cmd_line::{ parse_command, ParsedCommand };
 use external::{ run, run_chain };
+use http::Payload;
 
 lazy_static! {
     static ref SHELL_REGEX: Regex = Regex::new(r#"<!--\s*#exec\s+(.+)-->"#).unwrap();
 }
 
-pub fn insert_shell_commands(path: &Path, bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+pub fn insert_shell_commands(path: &Path, file: BufReader<File>) -> Result<Payload, String> {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("shtml") => substitute_shell_command(bytes),
-        _ => Ok(bytes)
+        Some("shtml") => substitute_shell_command(file),
+        _ => Ok(Payload::Stream(file))
     }
 }
 
-fn substitute_shell_command(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
-    String::from_utf8(bytes)
-        .map(|s| SHELL_REGEX.replace(&s,
-            |captured: &Captures| {
-                match parse_command(&captured[1]) {
-                    Ok(ParsedCommand::SingleCommand(cmd)) => {
-                        output(run(&cmd))
+fn substitute_shell_command(mut file: BufReader<File>) -> Result<Payload, String> {
+    let mut contents = String::new();
+    match file.read_to_string(&mut contents) {
+        Ok(_) => {
+            let replaced_string = SHELL_REGEX.replace(&contents,
+                |captured: &Captures| {
+                    match parse_command(&captured[1]) {
+                        Ok(ParsedCommand::SingleCommand(cmd)) => {
+                            output(run(&cmd))
+                        }
+                        Ok(ParsedCommand::PipeChain(cmds)) => {
+                            output(run_chain(&cmds))
+                        }
+                        Err(e) => e
                     }
-                    Ok(ParsedCommand::PipeChain(cmds)) => {
-                        output(run_chain(&cmds))
-                    }
-                    Err(e) => e
-                }
-            }).into_owned()
-        ).map(|replaced| replaced.to_string().into_bytes())
-         .map_err(|e| e.description().to_string())
+                }).into_owned().to_string();
+            Ok(Payload::Block(replaced_string))
+        },
+        Err(e) => Err(e.description().to_string())
+    }
 }
 
 fn output(cmd: Result<Child, String>) -> String {
@@ -47,25 +54,44 @@ fn output(cmd: Result<Child, String>) -> String {
 #[cfg(test)]
 mod test {
     use std::path::Path;
+    use std::fs::File;
+    use std::io::{ BufReader, Read };
+    use http::Payload;
     use super::insert_shell_commands;
 
     #[test]
     fn pass_through_if_not_shtml() {
-        let bytes = "<h1><!-- #exec echo \"Hello World\" --></h1>".to_string().into_bytes();
-        let expected = Ok(bytes.clone());
-        let path = Path::new("world.html");
+        let path = Path::new("test/improper_template.html");
+        let mut expected = String::new();
+        let mut expect_file = File::open(&path).unwrap();
+        let _ = expect_file.read_to_string(&mut expected);
 
-        assert_eq!(insert_shell_commands(&path, bytes), expected);
+        let test_file = BufReader::new(File::open(&path).unwrap());
+        let interpolated = insert_shell_commands(&path, test_file).unwrap();
+
+        match interpolated {
+            Payload::Stream(mut bfr) => {
+                let mut actual = String::new();
+                let _  = bfr.read_to_string(&mut actual).unwrap();
+                assert_eq!(actual, expected);
+            }
+            Payload::Block(_) => assert!(false, "Transformed file")
+        }
     }
 
     #[test]
     fn executes_shell_command_in_interpolated_shtml_file() {
-        let bytes = "<h1><!-- #exec echo \"Hello World\" --></h1>".to_string().into_bytes();
-        let expected = Ok("<h1>\"Hello World\"\n</h1>".to_string().into_bytes());
-        let path = Path::new("world.shtml");
+        let path = Path::new("test/world.shtml");
+        let expected = "<h1>\"Hello World\"\n</h1>\n".to_string();
 
-        let actual = insert_shell_commands(&path, bytes);
-        println!("expected {:?}; actual: {:?}", String::from_utf8(expected.clone().unwrap()), String::from_utf8(actual.clone().unwrap()));
-        assert_eq!(actual, expected);
+        let test_file = BufReader::new(File::open(&path).unwrap());
+        let interpolated = insert_shell_commands(&path, test_file).unwrap();
+
+        match interpolated {
+            Payload::Stream(_) =>  assert!(false, "Did not transform file"),
+            Payload::Block(interpolated) => {
+                assert_eq!(interpolated, expected);
+            }
+        }
     }
 }

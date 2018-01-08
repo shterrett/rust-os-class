@@ -11,5 +11,5 @@ requirements:
 + handles multiple concurrent requests (DONE)
 + preferentially scheduling requests from a particular IP range (DONE)
 + schedules responses to prioritize fastest expected response times (DONE)
-+ stream file responses
++ stream file responses (DONE)
 + cache files in memory

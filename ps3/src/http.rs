@@ -1,4 +1,6 @@
 use std::fmt;
+use std::fs::File;
+use std::io::{ BufReader };
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Status {
@@ -17,6 +19,11 @@ impl fmt::Display for Status {
             &Status::NotAuthorized => write!(f, "401 Not Authorized")
         }
     }
+}
+
+pub enum Payload {
+    Stream(BufReader<File>),
+    Block(String)
 }
 
 pub fn header(status: &Status) -> Vec<u8> {

@@ -1,10 +1,10 @@
 use std::collections::HashSet;
-use std::io::{ Read, Write };
+use std::io::{ BufReader, Write, copy };
 use std::io;
 use std::fs::File;
 use std::path::{ Path, Component };
 use path::Path as ReqPath;
-use http;
+use http::{ header, Status, Payload };
 use shell_interpolation::insert_shell_commands;
 
 lazy_static!{
@@ -29,41 +29,50 @@ enum AccessError {
     TypeNotAllowed
 }
 
-pub fn handle_request<T: Write>(req_path: io::Result<ReqPath>, visitor_count: usize, stream: &mut T) -> http::Status {
+pub fn handle_request<T: Write>(req_path: io::Result<ReqPath>, visitor_count: usize, stream: &mut T) -> Status {
     match req_path {
         Ok(path) => {
             let response_status =
                 router(path, visitor_count)
-                    .and_then(|bytes|{
-                        let header = http::header(&http::Status::Ok);
+                    .and_then(|mut payload| {
+                        let header = header(&Status::Ok);
                         stream.write(&header)
-                            .and_then(|_| stream.write(&bytes))
-                            .map_err(|_| http::Status::Error)
+                            .and_then(|_| {
+                                match &mut payload {
+                                    &mut Payload::Stream(ref mut f) => {
+                                        copy(f, stream)
+                                    }
+                                    &mut Payload::Block(ref s) => {
+                                        stream.write(s.as_bytes()).map(|b| b as u64)
+                                    }
+                                }
+                            })
+                            .map_err(|_| Status::Error)
                     })
                     .map_err(|e| {
-                        match stream.write(&http::header(&e)) {
+                        match stream.write(&header(&e)) {
                             Ok(_) => e,
-                            Err(_) => http::Status::Error
+                            Err(_) => Status::Error
                         }
                     });
 
                 match response_status {
-                    Ok(_) => http::Status::Ok,
+                    Ok(_) => Status::Ok,
                     Err(e) => e
                 }
         }
-        Err(_) => http::Status::Error
+        Err(_) => Status::Error
     }
 }
 
-fn router(path: ReqPath, visitor_count: usize) -> Result<Vec<u8>, http::Status> {
+fn router(path: ReqPath, visitor_count: usize) -> Result<Payload, Status> {
     match path {
         ReqPath::Root => root_handler(visitor_count),
         ReqPath::RelPath(path) => file_handler(path)
     }
 }
 
-fn root_handler(visitor_count: usize) -> Result<Vec<u8>, http::Status> {
+fn root_handler(visitor_count: usize) -> Result<Payload, Status> {
     let response =
         format!("<doctype !html><html><head><title>Hello, Rust!</title>
                 <style>body {{ background-color: #111; color: #FFEEAA }}
@@ -76,26 +85,21 @@ fn root_handler(visitor_count: usize) -> Result<Vec<u8>, http::Status> {
                 </body></html>\r\n",
                 visitor_count
             );
-    Ok(response.into_bytes())
+    Ok(Payload::Block(response.to_string()))
 }
 
-fn file_handler(path: String) -> Result<Vec<u8>, http::Status> {
-    let mut bytes: Vec<u8> = Vec::new();
+fn file_handler(path: String) -> Result<Payload, Status> {
     let file_path = Path::new(&path);
     valid_file(&file_path)
-        .and_then(|mut f| {
-            f.read_to_end(&mut bytes)
-                .map_err(|_| AccessError::NotFound)
-        })
-        .map(|_| bytes)
+        .map(|f| BufReader::new(f) )
         .map_err(|e| {
             match e {
-                AccessError::NotFound => http::Status::FileNotFound,
-                AccessError::OutOfBounds => http::Status::NotAuthorized,
-                AccessError::TypeNotAllowed => http::Status::NotAuthorized
+                AccessError::NotFound => Status::FileNotFound,
+                AccessError::OutOfBounds => Status::NotAuthorized,
+                AccessError::TypeNotAllowed => Status::NotAuthorized
             }
         })
-        .and_then(|b| insert_shell_commands(&file_path, b).map_err(|_| http::Status::Error))
+        .and_then(|f| insert_shell_commands(&file_path, f).map_err(|_| Status::Error))
 }
 
 fn valid_file(path: &Path) -> Result<File, AccessError> {
