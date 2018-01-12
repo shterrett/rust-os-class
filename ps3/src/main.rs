@@ -14,6 +14,7 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate regex;
+extern crate lru_cache;
 
 use std::net::TcpListener;
 use std::str;
@@ -32,6 +33,8 @@ mod request;
 
 use scheduling::{ schedule, queues, IpAddressable };
 use request::{ build_request, Request };
+use lru_cache::cache::LruCache;
+use handler::{ handle_request, Cache };
 
 fn main() {
     let addr = "127.0.0.1:4414";
@@ -40,17 +43,19 @@ fn main() {
     let (hq, lq) = queues();
     let high_priority = Arc::new(Mutex::new(hq));
     let low_priority = Arc::new(Mutex::new(lq));
+    let lru_cache: Cache = Arc::new(Mutex::new(LruCache::new(512)));
 
     println!("Listening on [{}] ...", addr);
 
     for _ in 1..4 {
         let count = visitor_count.clone();
         let high = high_priority.clone();
+        let cache = lru_cache.clone();
         thread::spawn(move || {
             loop {
                 let mut queue = high.lock().unwrap();
                 if let Some(request) = queue.pop().map(|s| s.request) {
-                    handle_incoming(request, count.load(Ordering::Relaxed));
+                    handle_incoming(&cache, request, count.load(Ordering::Relaxed));
                 } else {
                     thread::yield_now();
                 }
@@ -60,11 +65,12 @@ fn main() {
     for _ in 1..2 {
         let count = visitor_count.clone();
         let low = low_priority.clone();
+        let cache = lru_cache.clone();
         thread::spawn(move || {
             loop {
                 let mut queue = low.lock().unwrap();
                 if let Some(request) = queue.pop().map(|s| s.request) {
-                    handle_incoming(request, count.load(Ordering::Relaxed));
+                    handle_incoming(&cache, request, count.load(Ordering::Relaxed));
                 } else {
                     thread::yield_now();
                 }
@@ -81,7 +87,7 @@ fn main() {
                 let mut high_queue = high_priority.lock().unwrap();
                 let mut low_queue = low_priority.lock().unwrap();
                 let request = build_request(stream);
-                schedule(request, &mut high_queue, &mut low_queue)
+                schedule(&lru_cache, request, &mut high_queue, &mut low_queue)
             }
         }
     }
@@ -89,13 +95,13 @@ fn main() {
     drop(listener);
 }
 
-fn handle_incoming(mut request: Request, visitor_count: usize) {
+fn handle_incoming(cache: &Cache, mut request: Request, visitor_count: usize) {
     match request.ip_address() {
         Err(_) => (),
         Ok(pn) => println!("Received connection from: [{}]", pn),
     }
 
-    let status = handler::handle_request(request.path, visitor_count, &mut request.stream);
+    let status = handle_request(cache, request.path, visitor_count, &mut request.stream);
     println!("Response Status: {}", status);
     println!("Connection terminates.");
 }

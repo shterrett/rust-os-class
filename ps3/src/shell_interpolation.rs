@@ -12,33 +12,41 @@ lazy_static! {
     static ref SHELL_REGEX: Regex = Regex::new(r#"<!--\s*#exec\s+(.+)-->"#).unwrap();
 }
 
-pub fn insert_shell_commands(path: &Path, file: BufReader<File>) -> Result<Payload, String> {
+pub fn insert_shell_commands(path: &Path, payload: Payload) -> Result<Payload, String> {
+    match payload {
+        Payload::Stream(file) => insert_shell_commands_file(path, file),
+        Payload::Block(string) => substitute_shell_command(string)
+    }
+}
+
+fn insert_shell_commands_file(path: &Path, mut file: BufReader<File>) -> Result<Payload, String> {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("shtml") => substitute_shell_command(file),
+        Some("shtml") => {
+            let mut contents = String::new();
+            match file.read_to_string(&mut contents) {
+                Ok(_) => substitute_shell_command(contents),
+                Err(e) => Err(e.description().to_string())
+            }
+        }
         _ => Ok(Payload::Stream(file))
     }
 }
 
-fn substitute_shell_command(mut file: BufReader<File>) -> Result<Payload, String> {
-    let mut contents = String::new();
-    match file.read_to_string(&mut contents) {
-        Ok(_) => {
-            let replaced_string = SHELL_REGEX.replace(&contents,
-                |captured: &Captures| {
-                    match parse_command(&captured[1]) {
-                        Ok(ParsedCommand::SingleCommand(cmd)) => {
-                            output(run(&cmd))
-                        }
-                        Ok(ParsedCommand::PipeChain(cmds)) => {
-                            output(run_chain(&cmds))
-                        }
-                        Err(e) => e
-                    }
-                }).into_owned().to_string();
-            Ok(Payload::Block(replaced_string))
-        },
-        Err(e) => Err(e.description().to_string())
-    }
+
+fn substitute_shell_command(contents: String) -> Result<Payload, String> {
+    let replaced_string = SHELL_REGEX.replace(&contents,
+        |captured: &Captures| {
+            match parse_command(&captured[1]) {
+                Ok(ParsedCommand::SingleCommand(cmd)) => {
+                    output(run(&cmd))
+                }
+                Ok(ParsedCommand::PipeChain(cmds)) => {
+                    output(run_chain(&cmds))
+                }
+                Err(e) => e
+            }
+        }).into_owned().to_string();
+    Ok(Payload::Block(replaced_string))
 }
 
 fn output(cmd: Result<Child, String>) -> String {
@@ -66,7 +74,7 @@ mod test {
         let mut expect_file = File::open(&path).unwrap();
         let _ = expect_file.read_to_string(&mut expected);
 
-        let test_file = BufReader::new(File::open(&path).unwrap());
+        let test_file = Payload::Stream(BufReader::new(File::open(&path).unwrap()));
         let interpolated = insert_shell_commands(&path, test_file).unwrap();
 
         match interpolated {
@@ -84,7 +92,7 @@ mod test {
         let path = Path::new("test/world.shtml");
         let expected = "<h1>\"Hello World\"\n</h1>\n".to_string();
 
-        let test_file = BufReader::new(File::open(&path).unwrap());
+        let test_file = Payload::Stream(BufReader::new(File::open(&path).unwrap()));
         let interpolated = insert_shell_commands(&path, test_file).unwrap();
 
         match interpolated {

@@ -1,11 +1,14 @@
 use std::collections::HashSet;
-use std::io::{ BufReader, Write, copy };
+use std::io::{ Read, BufReader, Write, copy };
 use std::io;
 use std::fs::File;
-use std::path::{ Path, Component };
+use std::path::{ Path, PathBuf, Component };
+use std::sync::{ Arc, Mutex };
+use std::thread;
 use path::Path as ReqPath;
 use http::{ header, Status, Payload };
 use shell_interpolation::insert_shell_commands;
+use lru_cache::cache::LruCache;
 
 lazy_static!{
     static ref ALLOWED_FILE_TYPES: HashSet<&'static str> = {
@@ -29,11 +32,13 @@ enum AccessError {
     TypeNotAllowed
 }
 
-pub fn handle_request<T: Write>(req_path: io::Result<ReqPath>, visitor_count: usize, stream: &mut T) -> Status {
+pub type Cache = Arc<Mutex<LruCache<PathBuf>>>;
+
+pub fn handle_request<T: Write>(cache: &Cache, req_path: io::Result<ReqPath>, visitor_count: usize, stream: &mut T) -> Status {
     match req_path {
         Ok(path) => {
             let response_status =
-                router(path, visitor_count)
+                router(cache, path, visitor_count)
                     .and_then(|mut payload| {
                         let header = header(&Status::Ok);
                         stream.write(&header)
@@ -65,10 +70,10 @@ pub fn handle_request<T: Write>(req_path: io::Result<ReqPath>, visitor_count: us
     }
 }
 
-fn router(path: ReqPath, visitor_count: usize) -> Result<Payload, Status> {
+fn router(cache: &Cache, path: ReqPath, visitor_count: usize) -> Result<Payload, Status> {
     match path {
         ReqPath::Root => root_handler(visitor_count),
-        ReqPath::RelPath(path) => file_handler(path)
+        ReqPath::RelPath(path) => file_handler(cache, path)
     }
 }
 
@@ -88,10 +93,10 @@ fn root_handler(visitor_count: usize) -> Result<Payload, Status> {
     Ok(Payload::Block(response.to_string()))
 }
 
-fn file_handler(path: String) -> Result<Payload, Status> {
+fn file_handler(cache: &Cache, path: String) -> Result<Payload, Status> {
     let file_path = Path::new(&path);
     valid_file(&file_path)
-        .map(|f| BufReader::new(f) )
+        .and_then(|p| open_file(cache, p))
         .map_err(|e| {
             match e {
                 AccessError::NotFound => Status::FileNotFound,
@@ -99,10 +104,9 @@ fn file_handler(path: String) -> Result<Payload, Status> {
                 AccessError::TypeNotAllowed => Status::NotAuthorized
             }
         })
-        .and_then(|f| insert_shell_commands(&file_path, f).map_err(|_| Status::Error))
 }
 
-fn valid_file(path: &Path) -> Result<File, AccessError> {
+fn valid_file<'a>(path: &'a Path) -> Result<&'a Path, AccessError> {
     if path.is_absolute() {
         Err(AccessError::OutOfBounds)
     } else if path.components().any(|c| c == Component::ParentDir) {
@@ -110,9 +114,42 @@ fn valid_file(path: &Path) -> Result<File, AccessError> {
     } else if !valid_file_type(path) {
         Err(AccessError::TypeNotAllowed)
     } else {
-        File::open(path)
-            .map_err(|_| AccessError::NotFound)
+        Ok(path)
     }
+}
+
+fn open_file(cache: &Cache, path: &Path) -> Result<Payload, AccessError> {
+    let path_buf = path.to_owned();
+    match cache.lock().unwrap().get(&path_buf) {
+        Some(bytes) => {
+            String::from_utf8(bytes.to_vec())
+                .map_err(|_| AccessError::NotFound)
+                .map(|s| Payload::Block(s))
+        }
+        None => {
+            cache_file(cache, path);
+            File::open(path)
+                .map_err(|_| AccessError::NotFound)
+                .map(|f| Payload::Stream(BufReader::new(f)))
+        }
+    }.and_then(|p| {
+        insert_shell_commands(path, p).map_err(|_| AccessError::NotFound)
+    })
+}
+
+fn cache_file(cache: &Cache, path: &Path) {
+    let path_buf = path.to_owned();
+    let cache_handle = cache.clone();
+    thread::spawn(move || {
+        let mut contents = Vec::new();
+        match File::open(&path_buf).and_then(|mut f| f.read_to_end(&mut contents)) {
+            Ok(_) => {
+                cache_handle.lock().unwrap().put(path_buf, contents);
+            }
+            Err(_) => {}
+        }
+
+    });
 }
 
 fn valid_file_type(path: &Path) -> bool {
@@ -126,14 +163,21 @@ fn valid_file_type(path: &Path) -> bool {
 mod test {
     use regex::Regex;
     use path::Path;
-    use super::handle_request;
     use http::Status;
     use std::io;
+    use std::sync::{ Arc, Mutex };
+    use lru_cache::cache::LruCache;
+    use super::{ handle_request, Cache };
+
+    fn new_cache() -> Cache {
+        Arc::new(Mutex::new(LruCache::new(512)))
+    }
 
     #[test]
     fn root_handler_writes_html() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::Root), 5, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::Root), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
 
@@ -147,7 +191,8 @@ mod test {
     #[test]
     fn file_handler_returns_given_file() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::RelPath("test/response.html".to_string())), 5, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::RelPath("test/response.html".to_string())), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
 
@@ -159,7 +204,8 @@ mod test {
     #[test]
     fn fails_for_nonexistent_file() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::RelPath("test/does_not_exist.html".to_string())), 5, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::RelPath("test/does_not_exist.html".to_string())), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
 
@@ -171,7 +217,8 @@ mod test {
     #[test]
     fn fails_for_root_access() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::RelPath("/etc/hosts".to_string())), 5, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::RelPath("/etc/hosts".to_string())), 5, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -182,7 +229,8 @@ mod test {
     #[test]
     fn fails_for_parent_dir_access() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::RelPath("../README.md".to_string())), 6, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::RelPath("../README.md".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -193,7 +241,8 @@ mod test {
     #[test]
     fn fails_for_embedded_parent_dir_access() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::RelPath("test/../../index.html".to_string())), 6, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::RelPath("test/../../index.html".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -204,7 +253,8 @@ mod test {
     #[test]
     fn fails_for_unallowed_file_type() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::RelPath("test/passwords.txt".to_string())), 6, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::RelPath("test/passwords.txt".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -215,7 +265,8 @@ mod test {
     #[test]
     fn not_authorized_supersedes_not_found() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::RelPath("test/does_not_exist.txt".to_string())), 6, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::RelPath("test/does_not_exist.txt".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new(r"401 Not Authorized").unwrap();
@@ -226,7 +277,8 @@ mod test {
     #[test]
     fn interpolates_shell_command_in_shtml() {
         let mut output: Vec<u8> = Vec::new();
-        handle_request(Ok(Path::RelPath("test/world.shtml".to_string())), 6, &mut output);
+        let cache = new_cache();
+        handle_request(&cache, Ok(Path::RelPath("test/world.shtml".to_string())), 6, &mut output);
 
         let html = String::from_utf8(output).unwrap();
         let response = Regex::new("<h1>\"Hello World\"\n</h1>").unwrap();
@@ -237,7 +289,8 @@ mod test {
     #[test]
     fn returns_error_if_path_not_parsed() {
         let mut output: Vec<u8> = Vec::new();
-        let status = handle_request(Err(io::Error::new(io::ErrorKind::Other, "Whoops")), 6, &mut output);
+        let cache = new_cache();
+        let status = handle_request(&cache, Err(io::Error::new(io::ErrorKind::Other, "Whoops")), 6, &mut output);
 
         assert_eq!(status, Status::Error);
     }

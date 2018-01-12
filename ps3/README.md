@@ -12,4 +12,4 @@ requirements:
 + preferentially scheduling requests from a particular IP range (DONE)
 + schedules responses to prioritize fastest expected response times (DONE)
 + stream file responses (DONE)
-+ cache files in memory
++ cache files in memory (DONE - uses LRU cache I wrote in a separate project)

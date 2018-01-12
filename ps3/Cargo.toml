@@ -7,3 +7,4 @@ authors = ["Stuart Terrett <shterrett@gmail.com>"]
 [dependencies]
 regex = "0.2"
 lazy_static = "0.2.8"
+lru-cache = { git = "https://github.com/shterrett/rust-lru-cache" }

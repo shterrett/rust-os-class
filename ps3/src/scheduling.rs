@@ -3,9 +3,11 @@ use std::cmp::Ordering;
 use std::net::{ SocketAddr };
 use std::collections::BinaryHeap;
 use std::fs::File;
+use std::path::PathBuf;
 
 use request::Request;
 use path::Path;
+use handler::Cache;
 
 #[derive(Eq, PartialEq, Debug)]
 enum Priority {
@@ -65,25 +67,25 @@ pub fn queues<R>() -> (FastLane<R>, SlowLane<R>) where R: IpAddressable + Pathab
     (BinaryHeap::new(), BinaryHeap::new())
 }
 
-pub fn schedule<R>(request: R, high_queue: &mut FastLane<R>, low_queue: &mut SlowLane<R>)
+pub fn schedule<R>(cache: &Cache, request: R, high_queue: &mut FastLane<R>, low_queue: &mut SlowLane<R>)
     where R: IpAddressable + Pathable {
     match priority(&request) {
-        Priority::High => high_queue.push(scheduled_request(request)),
-        Priority::Low => low_queue.push(scheduled_request(request))
+        Priority::High => high_queue.push(scheduled_request(cache, request)),
+        Priority::Low => low_queue.push(scheduled_request(cache, request))
     }
 }
 
-fn scheduled_request<R>(request: R) -> WeightedRequest<R>
+fn scheduled_request<R>(cache: &Cache, request: R) -> WeightedRequest<R>
     where R: IpAddressable + Pathable{
 
-    let weight = weight(&request.path());
+    let weight = weight(cache, &request.path());
     WeightedRequest {
         weight: weight,
         request: request,
     }
 }
 
-fn weight(req_path: &io::Result<Path>) -> u64 {
+fn weight(cache: &Cache, req_path: &io::Result<Path>) -> u64 {
     match req_path {
         &Err(_) => 0,
         &Ok(Path::Root) => 1,
@@ -98,6 +100,12 @@ fn weight(req_path: &io::Result<Path>) -> u64 {
                         size
                     }
 
+                })
+                .map(|weight| {
+                    match cache.lock().unwrap().get(&PathBuf::from(path)) {
+                        Some(_) => weight / 10,
+                        None => weight
+                    }
                 })
                 .unwrap_or(u64::max_value())
         }
@@ -123,6 +131,9 @@ fn priority(request: &IpAddressable) -> Priority {
 #[cfg(test)]
 mod test {
     use std::io;
+    use std::io::Read;
+    use std::fs::File;
+    use std::path::PathBuf;
     use std::net::{
         SocketAddr,
         SocketAddrV4,
@@ -131,6 +142,9 @@ mod test {
         Ipv6Addr
     };
     use path::Path;
+    use handler::Cache;
+    use lru_cache::cache::LruCache;
+    use std::sync::{ Arc, Mutex };
     use super::{
         IpAddressable,
         Pathable,
@@ -156,6 +170,10 @@ mod test {
         fn path(&self) -> &io::Result<Path> {
             &self.path
         }
+    }
+
+    fn new_cache() -> Cache {
+        Arc::new(Mutex::new(LruCache::new(512)))
     }
 
     #[test]
@@ -206,11 +224,12 @@ mod test {
         };
 
         let (mut fast, mut slow) = queues();
+        let cache = new_cache();
 
-        schedule(error_req, &mut fast, &mut slow);
-        schedule(big_req, &mut fast, &mut slow);
-        schedule(small_req, &mut fast, &mut slow);
-        schedule(root_req, &mut fast, &mut slow);
+        schedule(&cache, error_req, &mut fast, &mut slow);
+        schedule(&cache, big_req, &mut fast, &mut slow);
+        schedule(&cache, small_req, &mut fast, &mut slow);
+        schedule(&cache, root_req, &mut fast, &mut slow);
 
         let order = fast.into_sorted_vec().iter().map(|wr| wr.request.name).collect::<Vec<&str>>();
         assert_eq!(order, vec!["Error", "Root", "Small", "Big"]);
@@ -236,12 +255,41 @@ mod test {
         };
 
         let (mut fast, mut slow) = queues();
+        let cache = new_cache();
 
-        schedule(small_shtml_req, &mut fast, &mut slow);
-        schedule(small_req, &mut fast, &mut slow);
-        schedule(med_req, &mut fast, &mut slow);
+        schedule(&cache, small_shtml_req, &mut fast, &mut slow);
+        schedule(&cache, small_req, &mut fast, &mut slow);
+        schedule(&cache, med_req, &mut fast, &mut slow);
 
         let order = fast.into_sorted_vec().iter().map(|wr| wr.request.name).collect::<Vec<&str>>();
         assert_eq!(order, vec!["Small", "Medium", "Dynamic"]);
+    }
+
+    #[test]
+    fn prioritizes_cached_files() {
+        let ip = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(128, 143, 23, 108), 80));
+        let read = FakeRequest {
+            name: "File IO",
+            ip: ip,
+            path: Ok(Path::RelPath("test/response.html".to_string()))
+        };
+        let cached = FakeRequest {
+            name: "Cache Hit",
+            ip: ip,
+            path: Ok(Path::RelPath("test/cache_response.html".to_string()))
+        };
+
+        let (mut fast, mut slow) = queues();
+        let cache = new_cache();
+        let mut cache_contents = Vec::new();
+        let _ = File::open("test/cache_response.html")
+            .and_then(|mut f| f.read_to_end(&mut cache_contents));
+        cache.lock().unwrap().put(PathBuf::from("test/cache_response.html"), cache_contents);
+
+        schedule(&cache, read, &mut fast, &mut slow);
+        schedule(&cache, cached, &mut fast, &mut slow);
+
+        let order = fast.into_sorted_vec().iter().map(|wr| wr.request.name).collect::<Vec<&str>>();
+        assert_eq!(order, vec!["Cache Hit", "File IO"]);
     }
 }
